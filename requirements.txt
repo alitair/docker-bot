@@ -1,0 +1,9 @@
+python-dotenv
+aiohttp
+fastapi[all]
+uvicorn
+requests
+daily-python
+pillow
+sounddevice
+numpy

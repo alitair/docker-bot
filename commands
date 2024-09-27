@@ -1,0 +1,3 @@
+fly launch
+fly deploy
+cat fly.env | fly secrets import
