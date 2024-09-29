@@ -3,6 +3,7 @@ import aiohttp
 import os
 import argparse
 import subprocess
+import sys
 import uvicorn
 
 from contextlib import asynccontextmanager
@@ -175,7 +176,7 @@ async def check_and_run( bot_name , url, token):
         if num_bots_in_room >= MAX_BOTS_PER_ROOM:
             return JSONResponse({"message": f"Agent already started for room {url}", "bot_pid": proc.pid})
         try:
-            proc = subprocess.Popen([f"python3 -m {bot_name} -u {url} -t {token}"],shell=True,bufsize=1,cwd=os.path.dirname(os.path.abspath(__file__)))
+            proc = subprocess.Popen([f"python3 -m {bot_name} -u {url} -t {token}"],shell=True,bufsize=1,stderr=subprocess.STDOUT,  cwd=os.path.dirname(os.path.abspath(__file__) ), text=True   )
             bot_procs[proc.pid] = (proc, url)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")

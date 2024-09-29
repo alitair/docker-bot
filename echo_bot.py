@@ -1,20 +1,124 @@
-import threading
-import queue
 import time
+import threading
 import json
+from typing import Mapping
 from   daily import *
 from   runner import configure
+import cv2
 from PIL import Image
+import struct
+import numpy as np
+
+class BufferedAudioData :
+    def __init__(self, data) :
+        self.data        = data
+        self.silent      = False
+        self.dt          = data.num_audio_frames / data.sample_rate
+    
+    def frames(self) :
+        # return self.data.audio_frames
+        if self.silent :
+            return bytes([0] * self.data.num_audio_frames * self.data.num_channels * self.data.bits_per_sample / 8 )
+        else :  
+            return self.data.audio_frames
+        
+class MediaBuffer : 
+
+    def __init__(self) :
+        self.buffer       = []
+        self.elapsed_time = 0.0
+        self._delay       = 0.0
+        self.read_index   = 0
+        self.buffer_ready = False
+
+    def pop(self) :
+        if not self.buffer_ready :
+            self.read_index = self._find_index()
+            self.buffer_ready = True
+
+        return self.buffer.pop( self.read_index )
+    
+    def _find_index(self) :
+
+        index   = len(self.buffer) - 1
+        if ( self._delay <= 0.0 ) :
+            return index
+
+        delta_t = 0.0
+        while (index >= 0) :
+            delta_t += self.buffer[index].dt
+            if delta_t > self._delay :
+                break
+            index -= 1
+        return index
+        
+class AudioBuffer(MediaBuffer) :
+
+    def __init__(self) :
+        super().__init__()
+
+    def append(self, data) :
+        buffered_audio_data = BufferedAudioData( data )
+
+        if self._delay <= 0.0 :
+            buffered_audio_data.silent = True
+
+        self.elapsed_time += buffered_audio_data.dt
+        self.buffer.append( buffered_audio_data )
+
+
+    def delay(self, value):
+        self._delay      = max(0, value - .15) # 150ms latency
+        self.read_index  = max(0, self._find_index() - 1)
+        for i in range(0,self.read_index) :
+            self.buffer[i].silent = True
+
+
+class BufferedVideoData :
+    def __init__(self, data, dt) :
+        self.data   = data
+        self.timestamp_us = data.timestamp_us
+        self.dt           = dt   
+
+    def width(self) :
+        return self.data.height
+    
+    def height(self) :
+        return self.data.width
+
+    def frames(self) :
+        image         = np.array( Image.frombytes(self.data.color_format, (self.data.width, self.data.height), self.data.buffer) ) 
+        rotated_frame = cv2.rotate( image , cv2.ROTATE_90_CLOCKWISE)
+        image         = Image.fromarray(rotated_frame)
+        buffer = image.tobytes()
+        return buffer
+    
+class VideoBuffer(MediaBuffer) : 
+    def __init__(self) :
+        super().__init__()
+
+    def delay(self, value):
+        self._delay = value
+        self.read_index  = max(0, self._find_index() - 1)
+        for i in range(0,self.read_index) :
+            self.buffer[i].data = self.buffer[self.read_index].data
+
+    def append(self, data ) :
+        if (len(self.buffer) == 0) :
+            buffered_video_data = BufferedVideoData( data,  0.0 )
+        else :
+            buffered_video_data = BufferedVideoData( data, (data.timestamp_us - self.buffer[ len(self.buffer) -1 ].timestamp_us)/1_000_000.0 )
+
+        self.elapsed_time += buffered_video_data.dt
+        self.buffer.append( buffered_video_data )
+
+
 
 
 class EchoBot(EventHandler):
 
-    # each frame is BUFFER seconds worth of audio
-    CHANNELS = 2
-    BUFFER = .01 * CHANNELS
-
-
     def on_call_state_updated(self,state):
+        print(f"Call state updated {state}")
         if state == "left":
             self._app_quit = True
 
@@ -22,10 +126,26 @@ class EchoBot(EventHandler):
         print(f"Error: {message}")
         self._app_quit = True
 
+    def on_joined(self, data, error):
+        print(f"on_joined { len(data["participants"].items()) } {error}")
+
+        if error:
+            print(f"Unable to join meeting: {error}")
+            self._app_quit = True
+
+        self.subscribe( self._find_bird( data["participants"]) )
+        self.send_ui()
+
     def on_participant_joined(self, participant):
+        print(f"on_participant_joined " + participant["id"] )
+
+        if (self._is_bird(participant)) :
+            self.subscribe(participant)
         self.send_ui(participant=participant["id"])
 
+
     def on_participant_left(self, participant, reason):
+        print(f"on_participant_left " + participant["id"] + " " + reason) 
 
         count = 0
 
@@ -37,7 +157,6 @@ class EchoBot(EventHandler):
             count += 1
 
         if count == 0:
-            self.leave() 
             self._app_quit = True  
 
 
@@ -57,172 +176,113 @@ class EchoBot(EventHandler):
 
     def delay(self, value):
         self._delay            = value
-        self._frame_size       = int(self._sample_rate * EchoBot.BUFFER)
-        self._blank_frame      = bytes([0] * self._frame_size)
-        self._ideal_queue_size = max( int( (self._delay-.1)/EchoBot.BUFFER), 1 )
-
+        self._audio_buffer.delay( self._delay )
+        self._video_buffer.delay( self._delay )
 
     def send_ui(self, participant=None):
-        
         payload = { "ui": [
             {"type" : "slider",
             "name"    : "delay",
             "value" : self._delay,
             "min"     : 0,
-            "max"     : 5,
+            "max"     : self._max_delay,
             "step"    : .5}]}
 
         print(f"sending ui - {participant} {json.dumps(payload)}")  
         self._client.send_app_message( { "message" : payload })
-        # self._client.send_prebuilt_chat_message(json.dumps(payload),"bot")
 
+
+    def _find_bird(self, participants): 
+        for key, participant in participants.items():
+            if self._is_bird(participant) :    
+                return participant
+        return None
+        
+    def _is_bird(self, participant) :
+        return not ( participant["info"]["isLocal"] == True  or participant["info"]["userId"] == "human" or  participant["info"]["userId"] == "bot" )
+
+    def subscribe(self, participant)  :
+        try : 
+            if (participant is not None and (not self._subscribed) ) :
+                print(f"Setting audio and video renderer to " + participant["info"]["userName"]  + " " + participant["id"] ) 
+                self._subscribed = True
+                self._client.set_audio_renderer(participant["id"], self.on_audio_frame )
+                self._client.set_video_renderer(participant["id"], self.on_video_frame )
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            # import traceback
+            # traceback.print_exc()
 
     def __init__(self):
 
-
-        self._function_map = {
-            "delay" : self.delay
-        }
-
-        self._sample_rate = 48000
-
+        self._subscribed  = False
+        self._audio_buffer = AudioBuffer()
+        self._video_buffer = VideoBuffer()
         self.delay(2)
-
-
-        self._framerate = 10
-        self._width = 540
-        self._height = 540
-        self._image = Image.new('RGB', (self._width, self._height), (0, 0, 0))
-        self._camera = Daily.create_camera_device("my-camera",width=self._image.width,height=self._image.height, color_format="RGB")
-
+        self._function_map = {"delay" : self.delay}
+        self._max_delay    = 5.0
         self._client = CallClient(self)
-        self._client.update_subscription_profiles({
-            "base": {
-                "camera": "unsubscribed",
-                "microphone": "subscribed"
-            }
-        })
+        self._client.update_subscription_profiles({ "base": {"camera": "subscribed", "microphone": "subscribed"}})
+        self._camera     = None
+        self._microphone = None 
+        self._app_quit   = False
+        self._registered = False
 
-        self._mic_device     = Daily.create_microphone_device("my-mic", sample_rate=self._sample_rate , channels=EchoBot.CHANNELS)
-        self._speaker_device = Daily.create_speaker_device("my-speaker", sample_rate=self._sample_rate , channels=EchoBot.CHANNELS)
-        Daily.select_speaker_device("my-speaker")
+        def wait_until_done():
+            while not self._app_quit:
+                time.sleep(0.1)
 
-        self.client_settings = {
-            "inputs": {
-                "camera": {
-                    "isEnabled": True,
-                    "settings": {
-                        "deviceId": "my-camera"
-                    }
-                },
-                "microphone": {
-                    "isEnabled": True,
-                    "settings": {
-                        "deviceId": "my-mic"
-                    }
-                }
-            }
-        }
-
-        self._app_quit = False
-        self._app_error = None
-
-        self._buffer_queue = queue.Queue()
-
-        self._start_send_image_event = threading.Event()
-        self._thread_send_image = threading.Thread(target=self.send_image)
-        self._thread_send_image.start()
-
-        self._start_receive_event = threading.Event()
-        self._thread_receive      = threading.Thread(target=self.receive_audio)
-        self._thread_receive.start()
-
-        self._start_send_event = threading.Event()
-        self._thread_send       = threading.Thread(target=self.send_audio)
-        self._thread_send.start()
-
+        self.__thread = threading.Thread(target=wait_until_done)
+        self.__thread.start()
 
     def run(self, url, token):
-        self._client.join(url, meeting_token=token, client_settings=self.client_settings, completion=self.on_joined)
-        self._thread_send_image.join()
-        self._thread_receive.join()
-        self._thread_send.join()
-
-
-    def on_joined(self, data, error):
-        if error:
-            print(f"Unable to join meeting: {error}")
-            self._app_error = error
-
-        self._start_send_image_event.set()
-        self._start_receive_event.set()
-        self._start_send_event.set()
-
-        self.send_ui()
-    
+        self._client.join(url, meeting_token=token, completion=self.on_joined)
+        self.__thread.join()
 
     def leave(self):
         self._app_quit = True
-        self._thread_send_image.join()
-        self._thread_receive.join()
-        self._thread_send.join()
         self._client.leave()
         self._client.release()
 
+    def on_audio_frame(self, participant_id, audio_data  ):
+        if self._app_quit:
+            return
+        
+        if audio_data :
+            if (self._microphone is None) :
+                self._microphone = Daily.create_microphone_device("mic", sample_rate=audio_data.sample_rate , channels=audio_data.num_channels)
 
-    def receive_audio(self):
-        self._start_receive_event.wait()
-        print("starting receive audio thread")
+            self._audio_buffer.append( audio_data ) 
 
-        if self._app_error:
-            print("Unable to receive audio!")
+            if self._audio_buffer.elapsed_time >= self._max_delay + 2.0 :
+                self._microphone.write_frames(self._audio_buffer.pop().frames())
+
+    def on_video_frame(self, participant_id, video_frame): 
+        if self._app_quit:
             return
 
-        while not self._app_quit:
+        if video_frame:
+            if (self._camera is None and self._video_buffer.elapsed_time >=2.0 ) :
+                self._camera = Daily.create_camera_device("cam",width=video_frame.height, height=video_frame.width, color_format=video_frame.color_format)
+                print( f"self._camera {self._camera.width} {self._camera.height} {self._camera.color_format}" )
 
-            if self._buffer_queue.qsize() > self._ideal_queue_size :
-                self._buffer_queue.get(timeout=.5)
+            if (self._registered == False) :
+                self.update_inputs()
 
-            buffer = self._speaker_device.read_frames(self._frame_size)
-            if buffer:
-                self._buffer_queue.put(buffer) 
+            self._video_buffer.append( video_frame ) 
+            
+            if self._video_buffer.elapsed_time >= self._max_delay + 2.0 :
+                self._camera.write_frame(  self._video_buffer.pop().frames() )
 
-    def send_audio(self):
-        self._start_send_event.wait()
-        print("starting send audio thread")
 
-        if self._app_error:
-            print("Unable to send audio!")
-            return
-
-        while not self._app_quit:
-            try:
-                if self._delay <= 0 :
-                    self._mic_device.write_frames(self._blank_frame)
-                elif self._buffer_queue.qsize() > self._ideal_queue_size - 1:
-                    buffer = self._buffer_queue.get(timeout=EchoBot.BUFFER) 
-                    if buffer:
-                        self._mic_device.write_frames(buffer)
-                else :
-                    time.sleep(EchoBot.BUFFER)
-            except queue.Empty:
-                continue
-
-    def send_image(self):
-        self._start_send_image_event.wait()
-        print("starting send_image thread")
-
-        if self._app_error:
-            print(f"Unable to send!")
-            return
-
-        sleep_time = 1.0 / self._framerate
-        image_bytes = self._image.tobytes()
-
-        while not self._app_quit:
-            self._camera.write_frame(image_bytes)
-            time.sleep(sleep_time)
-
+    def update_inputs(self) :
+        if (self._camera is not None and  self._microphone is not None ) :
+            self._registered = True
+            self._client.update_inputs({
+                "camera"    : { "isEnabled": True, "settings": {"deviceId": "cam" } },
+                "microphone": { "isEnabled": True, "settings": {"deviceId": "mic" } }
+            })
 
 def main():
     (url, token) =  configure()
@@ -233,12 +293,15 @@ def main():
     try: 
         bot.run(url, token)
 
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
     finally:
         bot.leave()
 
     Daily.deinit()
 
-    print("Exiting...")
+    print("Exited.")
     
 if __name__ == "__main__":
     main()
