@@ -17,11 +17,19 @@ def configure():
         required=False,
         help="token of Daily room to join",
     )
+    parser.add_argument(
+        "-d",
+        "--delay",
+        type=str,
+        required=False,
+        help="initial delay in milliseconds",
+    )
 
     args, unknown = parser.parse_known_args()
 
     url   = args.url   or os.getenv("ROOM_URL")
     token = args.token or os.getenv("ROOM_TOKEN")
+    delay = args.delay or os.getenv("DELAY", "500")
 
     if not url:
         raise Exception("No room specified. use the -u/--url option from the command line, or set ROOM_URL in your environment to specify a Daily room URL.")
@@ -29,4 +37,4 @@ def configure():
     if not token:
         raise Exception("No token specified. use the -t/--token option from the command line, or set ROOM_TOKEN in your environment to specify a Daily room token.")
 
-    return (url, token)
+    return (url, token, delay)

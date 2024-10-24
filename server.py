@@ -28,21 +28,22 @@ daily_helpers = {}
 
 load_dotenv()
 
-bots = [ "echo_bot" , "silent_bot"]
+bots   = [ "silent_bot", "echo_bot" , "echo_bot" , "echo_bot" , "echo_bot" , "echo_bot", "echo_bot" , "echo_bot" ]
+props  = [ "0"         , "0"        , "250"      , "500"      , "750"      , "1000"    , "1500"     , "2000"     ]
+paths  = [ f"{bot}_{prop}" for bot,prop in zip(bots,props) ]
 
 
 async def register_bot(aiohttp_session, config, available: bool):
 
     server = os.getenv("BIRDCONV_SERVER")
     birdconv_url = f"{server}/api/register"
-    echo_bot_url = f"http://{config.host}:{config.port}/bot"
 
     payload = { "bots": {} }
     
-    for bot in bots :
-        payload["bots"][bot] = {
+    for bot,path  in zip(bots,paths) :
+        payload["bots"][ f"{path}"] = {
             "uid"      : os.getenv("API_KEY"),
-            "service"  : f"{APP_HOST}/{bot}",
+            "service"  : f"{APP_HOST}/{path}",
             "available": available
         }
 
@@ -84,7 +85,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    await register_bot(aiohttp_session,config, available=False)
+    # await register_bot(aiohttp_session,config, available=False)
     await aiohttp_session.close()
     cleanup()
 
@@ -108,7 +109,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-async def spawn_fly_machine(bot_name: str, url: str, token: str, ):
+async def spawn_fly_machine(bot_name: str, url: str, token: str, delay:str):
     async with aiohttp.ClientSession() as session:
         # Use the same image as the bot runner
         async with session.get(f"{FLY_API_HOST}/apps/{FLY_APP_NAME}/machines", headers=FLY_HEADERS) as r:
@@ -120,7 +121,7 @@ async def spawn_fly_machine(bot_name: str, url: str, token: str, ):
             image = data[0]['config']['image']
 
         # Machine configuration
-        cmd = f"python3  -m {bot_name} -u {url} -t {token}"
+        cmd = f"python3  -m {bot_name} -u {url} -t {token} -d {delay}"
         cmd = cmd.split()
         worker_props = {
             "config": {
@@ -159,7 +160,7 @@ async def spawn_fly_machine(bot_name: str, url: str, token: str, ):
 
 
 
-async def check_and_run( bot_name , url, token):
+async def check_and_run( bot_name , url, token, delay):
 
     if not bot_name:
         raise HTTPException(status_code=500,detail="Missing 'bot_name' property in request data. Cannot start agent")
@@ -176,13 +177,13 @@ async def check_and_run( bot_name , url, token):
         if num_bots_in_room >= MAX_BOTS_PER_ROOM:
             return JSONResponse({"message": f"Agent already started for room {url}", "bot_pid": proc.pid})
         try:
-            proc = subprocess.Popen([f"python3 -m {bot_name} -u {url} -t {token}"],shell=True,bufsize=1,stderr=subprocess.STDOUT,  cwd=os.path.dirname(os.path.abspath(__file__) ), text=True   )
+            proc = subprocess.Popen([f"python3 -m {bot_name} -u {url} -t {token} -d {delay}"],shell=True,bufsize=1,stderr=subprocess.STDOUT,  cwd=os.path.dirname(os.path.abspath(__file__) ), text=True   )
             bot_procs[proc.pid] = (proc, url)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
     else:
         try:
-            await spawn_fly_machine(bot_name, url, token)
+            await spawn_fly_machine(bot_name, url, token, delay)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to spawn VM: {e}")
     
@@ -193,13 +194,37 @@ async def check_and_run( bot_name , url, token):
 def test( request ) :
     return JSONResponse({"message": f"{FLY_APP_NAME} started for url {APP_HOST}"})
 
-@app.post(f"/{bots[0]}")
+@app.post(f"/{paths[0]}")
 async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[0], request.url, request.token)
+    await check_and_run(bots[0], request.url, request.token, props[0] )
 
-@app.post(f"/{bots[1]}")
+@app.post(f"/{paths[1]}")
 async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[1], request.url, request.token)
+    await check_and_run(bots[1], request.url, request.token, props[1] )
+
+@app.post(f"/{paths[2]}")
+async def start_agent(request: StartAgentRequest):
+    await check_and_run(bots[2], request.url, request.token, props[2] )
+
+@app.post(f"/{paths[3]}")
+async def start_agent(request: StartAgentRequest):
+    await check_and_run(bots[3], request.url, request.token, props[3] )
+
+@app.post(f"/{paths[4]}")
+async def start_agent(request: StartAgentRequest):
+    await check_and_run(bots[4], request.url, request.token, props[4] )
+
+@app.post(f"/{paths[5]}")
+async def start_agent(request: StartAgentRequest):
+    await check_and_run(bots[5], request.url, request.token, props[5] )
+
+@app.post(f"/{paths[6]}")
+async def start_agent(request: StartAgentRequest):
+    await check_and_run(bots[6], request.url, request.token, props[6] )
+
+@app.post(f"/{paths[7]}")
+async def start_agent(request: StartAgentRequest):
+    await check_and_run(bots[7], request.url, request.token, props[7] )
 
 if __name__ == "__main__":
 

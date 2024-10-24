@@ -9,6 +9,9 @@ from PIL import Image
 import struct
 import numpy as np
 
+
+ASSUMED_LATENCY = 0.150
+
 class BufferedAudioData :
     def __init__(self, data) :
         self.data        = data
@@ -18,7 +21,7 @@ class BufferedAudioData :
     def frames(self) :
         # return self.data.audio_frames
         if self.silent :
-            return bytes([0] * self.data.num_audio_frames * self.data.num_channels * self.data.bits_per_sample / 8 )
+            return bytes([0] * int(self.data.num_audio_frames * self.data.num_channels * self.data.bits_per_sample / 8) )
         else :  
             return self.data.audio_frames
         
@@ -68,7 +71,7 @@ class AudioBuffer(MediaBuffer) :
 
 
     def delay(self, value):
-        self._delay      = max(0, value - .15) # 150ms latency
+        self._delay      = max(0, value - ASSUMED_LATENCY ) # 150ms latency
         self.read_index  = max(0, self._find_index() - 1)
         for i in range(0,self.read_index) :
             self.buffer[i].silent = True
@@ -127,7 +130,7 @@ class EchoBot(EventHandler):
         self._app_quit = True
 
     def on_joined(self, data, error):
-        print(f"on_joined { len(data["participants"].items()) } {error}")
+        print(f"on_joined {error}")
 
         if error:
             print(f"Unable to join meeting: {error}")
@@ -184,9 +187,9 @@ class EchoBot(EventHandler):
             {"type" : "slider",
             "name"    : "delay",
             "value" : self._delay,
-            "min"     : 0,
+            "min"     : ASSUMED_LATENCY,
             "max"     : self._max_delay,
-            "step"    : .5}]}
+            "step"    : .050}]}
 
         print(f"sending ui - {participant} {json.dumps(payload)}")  
         self._client.send_app_message( { "message" : payload })
@@ -271,7 +274,7 @@ class EchoBot(EventHandler):
                 self.update_inputs()
 
             self._video_buffer.append( video_frame ) 
-            
+
             if self._video_buffer.elapsed_time >= self._max_delay + 2.0 :
                 self._camera.write_frame(  self._video_buffer.pop().frames() )
 
@@ -285,10 +288,13 @@ class EchoBot(EventHandler):
             })
 
 def main():
-    (url, token) =  configure()
+    (url, token, delay) =  configure()
+
+    print(f"echo_bot: {url} {token} {delay}")
 
     Daily.init()
     bot = EchoBot()
+    bot.delay( int(delay)/1000.0)
 
     try: 
         bot.run(url, token)
