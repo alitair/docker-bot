@@ -121,7 +121,7 @@ async def spawn_fly_machine(bot_name: str, url: str, token: str, delay:str):
             image = data[0]['config']['image']
 
         # Machine configuration
-        cmd = f"python3  -m {bot_name} -u {url} -t {token} -d {delay}"
+        cmd = f"python3 -m {bot_name} -u {url} -t {token} -d {delay}"
         cmd = cmd.split()
         worker_props = {
             "config": {
@@ -156,9 +156,6 @@ async def spawn_fly_machine(bot_name: str, url: str, token: str, delay:str):
                 text = await r.text()
                 raise Exception(f"Bot was unable to enter started state: {text}")
 
-    print(f"Machine joined room: {url}")
-
-
 
 async def check_and_run( bot_name , url, token, delay):
 
@@ -173,58 +170,64 @@ async def check_and_run( bot_name , url, token, delay):
 
     if RUN_AS_PROCESS :
 
+        print(f"Running as a process {bot_name} {url} {delay}")
+
         num_bots_in_room = sum(1 for proc in bot_procs.values() if proc[1] == url and proc[0].poll() is None)
         if num_bots_in_room >= MAX_BOTS_PER_ROOM:
-            return JSONResponse({"message": f"Agent already started for room {url}", "bot_pid": proc.pid})
+            return JSONResponse({"message": f"Agent already started for room {url}"})
         try:
-            proc = subprocess.Popen([f"python3 -m {bot_name} -u {url} -t {token} -d {delay}"],shell=True,bufsize=1,stderr=subprocess.STDOUT,  cwd=os.path.dirname(os.path.abspath(__file__) ), text=True   )
+            proc = subprocess.Popen([f"python3 -m {bot_name} -u {url} -t {token} -d {delay}"],shell=True,stdout=sys.stdout, bufsize=1, cwd=os.path.dirname(os.path.abspath(__file__) ), text=True   )
             bot_procs[proc.pid] = (proc, url)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
     else:
+
+        print(f"Spawning machine {bot_name} {url} {delay}")
+        
         try:
             await spawn_fly_machine(bot_name, url, token, delay)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to spawn VM: {e}")
+        
+    print(f"Machine joined room: {url}")
     
     return JSONResponse({"message": f"{bot_name} started for room {url}"})
 
-
-@app.get(f"/")
-def test( request ) :
+@app.get(f"/test")
+async def start_agent():
     return JSONResponse({"message": f"{FLY_APP_NAME} started for url {APP_HOST}"})
 
 @app.post(f"/{paths[0]}")
-async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[0], request.url, request.token, props[0] )
+async def start_agent_0(request: StartAgentRequest):
+    return await check_and_run(bots[0], request.url, request.token, props[0] )
 
 @app.post(f"/{paths[1]}")
-async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[1], request.url, request.token, props[1] )
+async def start_agent_1(request: StartAgentRequest):
+    return await check_and_run(bots[1], request.url, request.token, props[1] )
 
 @app.post(f"/{paths[2]}")
-async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[2], request.url, request.token, props[2] )
+async def start_agent_2(request: StartAgentRequest):
+    return await check_and_run(bots[2], request.url, request.token, props[2] )
 
 @app.post(f"/{paths[3]}")
-async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[3], request.url, request.token, props[3] )
+async def start_agent_3(request: StartAgentRequest):
+    return  await check_and_run(bots[3], request.url, request.token, props[3] )
 
 @app.post(f"/{paths[4]}")
-async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[4], request.url, request.token, props[4] )
+async def start_agent_4(request: StartAgentRequest):
+    return await check_and_run(bots[4], request.url, request.token, props[4] )
 
 @app.post(f"/{paths[5]}")
-async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[5], request.url, request.token, props[5] )
+async def start_agent_5(request: StartAgentRequest):
+    return await check_and_run(bots[5], request.url, request.token, props[5] )
 
 @app.post(f"/{paths[6]}")
-async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[6], request.url, request.token, props[6] )
+async def start_agent_6(request: StartAgentRequest):
+    return await check_and_run(bots[6], request.url, request.token, props[6] )
 
 @app.post(f"/{paths[7]}")
-async def start_agent(request: StartAgentRequest):
-    await check_and_run(bots[7], request.url, request.token, props[7] )
+async def start_agent_7(request: StartAgentRequest):
+    return await check_and_run(bots[7], request.url, request.token, props[7] )
 
 if __name__ == "__main__":
 
