@@ -1,4 +1,4 @@
-fly launch
+fly launch --org GardnerLab_UO_KnightCampus
 fly deploy
 cat fly.env | fly secrets import
 

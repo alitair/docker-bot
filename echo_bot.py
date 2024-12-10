@@ -126,14 +126,18 @@ class BufferedVideoData :
     def __init__(self, data, expected_width, expected_height) :
         self.data            = data
         self.elapsed_time    = time.time() #data.timestamp_us/1000000.0
-        self.expected_width  = expected_height
-        self.expected_height = expected_width
+        # self.expected_width  = expected_height
+        # self.expected_height = expected_width
+
+        self.expected_width  = expected_width
+        self.expected_height = expected_height
 
     def frames(self, silent=False) :
         image = Image.frombytes(self.data.color_format, (self.data.width, self.data.height), self.data.buffer)
         if image.width != self.expected_width or image.height != self.expected_height:
             image = image.resize((self.expected_width, self.expected_height), Image.LANCZOS)  # LANCZOS for high-quality resizing
-        return image.transpose(Image.ROTATE_270).tobytes()
+        return image.tobytes()
+        # return image.transpose(Image.ROTATE_270).tobytes()
 
 
 class EchoBot(EventHandler):
